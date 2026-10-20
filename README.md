@@ -40,7 +40,7 @@ If you find our work useful, please cite:
   title     = {On the Instability of Saliency Maps under Sparse Perturbations},
   author    = {Khoa Tran and Thai Huy Nguyen and Quan Minh Phan and Khang Tran and Viet-Hang Duong and Tien-Dung Mai and Ngoc Hoang Luong},
   booktitle = {Proceedings of the 2026 International Conference on Multimedia Analysis and Pattern Recognition (MAPR)},
-  year      = {2026},
+  year      = {2027},
   publisher = {IEEE}
 }
 ```
