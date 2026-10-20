@@ -32,15 +32,15 @@ If you find our work useful, please cite:
   title={Few Pixels, Fragile Faithfulness: Evaluating Visual Explanations under Sparse Perturbations},
   author={Khoa Tran, Viet-Hang Duong, Ngoc Hoang Luong},
   booktitle={International Conference on Multimedia Modeling (MM)},
-  year={2026},
+  year={2027},
   publisher = {Springer}
 }
 
-@inproceedings{sparse_saliency,
+@inproceedings{khoatn-mapr2026,
   title     = {On the Instability of Saliency Maps under Sparse Perturbations},
-  author    = {Khoa Tran and Thai Huy Nguyen and Quan Minh Phan and Khang Tran and Viet-Hang Duong and Tien-Dung Mai and Ngoc Hoang Luong},
+  author    = {Khoa Tran, Thai Huy Nguyen, Quan Minh Phan, Khang Tran, Viet-Hang Duong, Tien-Dung Mai, Ngoc Hoang Luong},
   booktitle = {Proceedings of the 2026 International Conference on Multimedia Analysis and Pattern Recognition (MAPR)},
-  year      = {2027},
+  year      = {2026},
   publisher = {IEEE}
 }
 ```

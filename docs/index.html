@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A sparse, prediction-preserving genetic attack that jointly shifts visual explanations and reduces their faithfulness.">
+  <meta property="og:title" content="Few Pixels, Fragile Faithfulness: Evaluating Visual Explanations under Sparse Perturbations">
+  <meta property="og:description" content="Evaluating visual explanations under sparse perturbations.">
+  <meta property="og:image" content="static/img/thumnail_vision.png">
+  <meta name="keywords" content="visual explanations, saliency maps, sparse perturbations, explanation faithfulness, genetic algorithm">
+  <title>Few Pixels, Fragile Faithfulness: Evaluating Visual Explanations under Sparse Perturbations</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="static/css/index.css">
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body>
+  <header class="hero">
+    <div class="container hero-content">
+      <h1>Few Pixels, Fragile Faithfulness: Evaluating Visual Explanations under Sparse Perturbations</h1>
+      <p class="acceptance"><span aria-hidden="true">✓</span> Accepted at MMM 2027</p>
+      <p class="authors">
+        Khoa Tran<sup>1,2</sup> &middot; Viet-Hang Duong<sup>1,2</sup> &middot; Ngoc Hoang Luong<sup>1,2</sup>
+      </p>
+      <div class="affiliations">
+        <p class="affiliation"><sup>1</sup> University of Information Technology, Ho Chi Minh City, Vietnam</p>
+        <p class="affiliation"><sup>2</sup> Vietnam National University, Ho Chi Minh City, Vietnam</p>
+      </div>
+      <nav class="actions" aria-label="Paper links">
+        <a class="button button-primary" href="https://github.com/khoa16122004/Shift-Faithfulness-Attack" target="_blank" rel="noopener noreferrer">Source code</a>
+        <span class="button button-secondary button-disabled" aria-disabled="true">DOI <span class="coming-soon">(coming soon)</span></span>
+      </nav>
+    </div>
+    <div class="container hero-figure">
+      <img src="static/img/thumnail_vision.png" alt="Illustration of sparse perturbations changing a visual explanation while preserving the model prediction">
+    </div>
+  </header>
+
+  <main>
+    <section class="section section-light" id="abstract">
+      <div class="container narrow">
+        <!-- <p class="eyebrow">Why this matters</p> -->
+        <h2>Changing an explanation is not enough</h2>
+        <p class="lead">
+          Visual explanations can be manipulated without changing a model's prediction. But a shifted saliency map may still point to evidence the model actually uses, so explanation shift alone does not guarantee reduced faithfulness.
+        </p>
+        <p class="lead">
+          This work introduces a sparse, prediction-preserving attack that jointly shifts saliency maps and weakens their faithfulness. A gradient-free genetic algorithm searches for perturbations affecting at most 0.1% of image pixels. Experiments across six vision models and six explanation methods show that a small pixel budget can both redirect saliency toward less relevant regions and substantially degrade explanation faithfulness.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" id="method">
+      <div class="container">
+        <div class="container narrow">
+          <!-- <p class="eyebrow">Approach</p> -->
+          <h2>A sparse genetic search with two goals</h2>
+          <!-- <p>The attack evolves candidate pixel changes, evaluates each candidate against the combined objective, then keeps better solutions for the next generation.</p> -->
+        </div>
+        <figure class="figure-card method-figure">
+          <img src="static/img/method.png" alt="Genetic algorithm workflow showing offspring generation, crossover, mutation, candidate evaluation, and adversarial saliency maps">
+          <figcaption><strong>Attack workflow.</strong> Candidate perturbations undergo crossover and mutation. The genetic algorithm evaluates their saliency shift and faithfulness objectives while respecting the sparse perturbation budget.</figcaption>
+        </figure>
+
+        <div class="problem-card">
+          <h3>Problem formulation</h3>
+          <p>
+            Given an image \(x\), a classifier \(f\), and its original predicted class \(\hat{y}\), we seek a sparse perturbation \(\delta\). The resulting image is \(x_{\mathrm{adv}}=\operatorname{clip}(x+\delta,0,1)\), and \(\phi^x\) and \(\phi^{x_{\mathrm{adv}}}\) denote the saliency maps for the clean and perturbed images, respectively. We want to reduce the faithfulness of the adversarial explanation and shift it away from the original map, while changing no more than \(\epsilon\) pixel locations and preserving the original prediction:
+          </p>
+          <div class="formula">
+            \[
+              \min_{\delta}\quad
+              \underbrace{\operatorname{InsertionAUC}(x_{\mathrm{adv}},\phi^{x_{\mathrm{adv}}},f)
+              - \operatorname{DeletionAUC}(x_{\mathrm{adv}},\phi^{x_{\mathrm{adv}}},f)}_{\text{Faithfulness reduction}}
+              + \underbrace{\operatorname{SpearmanCorr}(\phi^{x_{\mathrm{adv}}},\phi^x)}_{\text{Explanation shift}}
+            \]
+            \[
+              \text{subject to}\quad
+              |\{(i,j):\delta_{i,j}\neq 0\}|\leq\epsilon,
+              \qquad
+              \arg\max_l f(x+\delta)_l=\hat{y}.
+            \]
+          </div>
+          <p>
+            Minimizing the first term lowers insertion AUC and raises deletion AUC, indicating weaker faithfulness; minimizing Spearman correlation encourages a larger change in saliency ranking.
+          </p>
+        </div>
+
+        <div class="objective-intro">
+          <h3>From the problem to optimization objectives</h3>
+          <p>
+            These evaluation metrics rely on ranked regions and provide coarse signals for a genetic search. We therefore use smoother surrogate losses for insertion and deletion, together with a Jaccard-based saliency-overlap loss. Their weighted sum gives the objective evaluated for each candidate perturbation.
+          </p>
+        </div>
+
+        <div class="objective-grid">
+          <article class="objective-card">
+            <span class="card-number">01</span>
+            <h3>Insertion and deletion</h3>
+            <p>Smooth surrogates approximate the faithfulness tests and guide the search toward explanations that provide weaker evidence for the predicted class.</p>
+          </article>
+          <article class="objective-card">
+            <span class="card-number">02</span>
+            <h3>Saliency-map shift</h3>
+            <p>A Jaccard-overlap loss encourages the adversarial saliency map to differ from the clean map.</p>
+          </article>
+        </div>
+
+        <div class="formula-card">
+          <h3>Weighted surrogate objective</h3>
+          <p class="formula">
+            \[
+              \min_{\delta}\quad
+              \mathcal{L}_{\mathrm{total}}
+              = \lambda_{\mathrm{ins}}\mathcal{L}_{\mathrm{ins}}
+              + \lambda_{\mathrm{del}}\mathcal{L}_{\mathrm{del}}
+              + \lambda_{\mathrm{sal}}\mathcal{L}_{\mathrm{sal}}
+            \]
+            \[
+              \text{subject to}\quad
+              \|\delta\|_{0,\mathrm{pixels}} \leq \epsilon,
+              \qquad
+              \arg\max f(x_{\mathrm{adv}}) = \hat{y},
+              \qquad
+              x_{\mathrm{adv}} = \operatorname{clip}(x+\delta, 0, 1).
+            \]
+          </p>
+          <p>
+            Here, \(\mathcal{L}_{\mathrm{ins}}\) and \(\mathcal{L}_{\mathrm{del}}\) are smooth insertion and deletion surrogates, while \(\mathcal{L}_{\mathrm{sal}}\) is the Jaccard overlap between the clean and adversarial saliency maps. Each weight \(\lambda\in\{0,1\}\) switches its objective off or on. The Shift-Faithfulness attack uses \((\lambda_{\mathrm{ins}},\lambda_{\mathrm{del}},\lambda_{\mathrm{sal}})=(1,1,1)\). The other variants are Deletion-Driven \((0,1,0)\), Insertion-Driven \((1,0,0)\), Faithfulness-Driven \((1,1,0)\), and Shift-Only \((0,0,1)\).
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-light" id="results">
+      <div class="container">
+        <div class="section-heading">
+          <!-- <p class="eyebrow">What the experiments show</p> -->
+          <h2>Saliency shift and faithfulness reduction together</h2>
+          <p>Compared with a shift-only attack, jointly optimizing both goals can produce explanations that are not only different, but also less faithful to the model's prediction.</p>
+        </div>
+        <div class="results-gallery">
+          <figure class="figure-card">
+            <img src="static/img/curve.png" alt="Optimization trajectories and deletion and insertion faithfulness curves for different attack variants">
+          </figure>
+          <figure class="figure-card">
+            <img src="static/img/spearman_bar.png" alt="Mean Spearman rank correlation between clean and adversarial saliency maps for different attack variants">
+          </figure>
+          <figure class="figure-card">
+            <img src="static/img/more_sample.png" alt="Examples comparing clean images, shift-only attacks, and the proposed joint shift-faithfulness attack, with insertion and deletion curves">
+          </figure>
+          <figure class="figure-card">
+            <img src="static/img/result.png" alt="Faithfulness evaluation results for different optimization objectives across convolutional and vision transformer models">
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="citation">
+      <div class="container narrow">
+        <h2>References</h2>
+        <div class="citation-list">
+          <article class="citation-card">
+            <div class="citation-heading">
+              <span class="citation-type">CONFERENCE PAPER</span>
+              <!-- <span class="citation-key">khoatn-mmm2027</span> -->
+            </div>
+            <pre class="bibtex"><code><span class="bib-entry">@inproceedings</span>{<span class="bib-key">khoatn-mmm2027</span>,
+  <span class="bib-field">title</span>     = <span class="bib-value">{Few Pixels, Fragile Faithfulness: Evaluating Visual Explanations under Sparse Perturbations}</span>,
+  <span class="bib-field">author</span>    = <span class="bib-value">{Khoa Tran, Viet-Hang Duong, Ngoc Hoang Luong}</span>,
+  <span class="bib-field">booktitle</span> = <span class="bib-value">{International Conference on Multimedia Modeling (MM)}</span>,
+  <span class="bib-field">year</span>      = <span class="bib-value">{2027}</span>,
+  <span class="bib-field">publisher</span> = <span class="bib-value">{Springer}</span>
+}</code></pre>
+          </article>
+          <article class="citation-card">
+            <div class="citation-heading">
+              <span class="citation-type">CONFERENCE PAPER</span>
+              <!-- <span class="citation-key">sparse_saliency</span> -->
+            </div>
+            <pre class="bibtex"><code><span class="bib-entry">@inproceedings</span>{<span class="bib-key">sparse_saliency</span>,
+  <span class="bib-field">title</span>     = <span class="bib-value">{On the Instability of Saliency Maps under Sparse Perturbations}</span>,
+  <span class="bib-field">author</span>    = <span class="bib-value">{Khoa Tran and Thai Huy Nguyen and Quan Minh Phan and Khang Tran and Viet-Hang Duong and Tien-Dung Mai and Ngoc Hoang Luong}</span>,
+  <span class="bib-field">booktitle</span> = <span class="bib-value">{Proceedings of the 2026 International Conference on Multimedia Analysis and Pattern Recognition (MAPR)}</span>,
+  <span class="bib-field">year</span>      = <span class="bib-value">{2026}</span>,
+  <span class="bib-field">publisher</span> = <span class="bib-value">{IEEE}</span>
+}</code></pre>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-content">
+      <p><strong>Few Pixels, Fragile Faithfulness</strong></p>
+      <p><a href="paper.pdf">Paper PDF</a><span aria-hidden="true"> &middot; </span><a href="https://github.com/khoa16122004/Shift-Faithfulness-Attack" target="_blank" rel="noopener noreferrer">GitHub repository</a></p>
+    </div>
+  </footer>
+</body>
+</html>
