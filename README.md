@@ -28,7 +28,7 @@ python run_batch.py \
 
 ```sh
 python run_sample.py \
-	--image test_imgs/cat_dog.png \
+	--image test_imgs/cat.png \
 	--output outputs/adv.png \
 	--model resnet18 \
 	--fitness-function margin_loss_causal_faithfull \
@@ -69,6 +69,16 @@ columns with a `#` header and no margin column; summaries expose
 fitness and saliency (or insertion loss for causal-only runs);
 `--fitness-chart-output` replaces `--margin-chart-output`.
 Historical evaluation scripts for older margin/Pareto results are unchanged.
+
+After each sample attack, the runner re-evaluates insertion/deletion faithfulness
+on the clean and final adversarial tensors and saves `<output>_faithfulness.png`.
+Both panels compare clean/adversarial curves with their AUC values; these are
+causal curves over pixel fractions, not optimization losses over generations.
+The RISE evaluator normalizes these curves, so the vertical axis is normalized
+score rather than raw probability. Use `--faithfulness-chart-output` to override
+the path and `--show-faithfulness-chart` to display the figure interactively
+(omit it on headless servers). This uses the in-memory tensors, not the
+quantized PNG files. The current RISE evaluator requires CUDA.
 
 Focused regression tests (CPU, no model downloads):
 

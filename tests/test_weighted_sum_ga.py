@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from unittest.mock import MagicMock
 
 import torch
 
@@ -217,6 +218,51 @@ class WeightedSumTests(unittest.TestCase):
 
 
 class RunnerContractTests(unittest.TestCase):
+    def test_faithfulness_chart_compares_clean_and_adv_and_closes_figure(self):
+        plotting = MagicMock()
+        figure = MagicMock()
+        axes = [MagicMock(), MagicMock()]
+        plotting.subplots.return_value = (figure, axes)
+        namespace = load_functions(
+            "run_sample.py", {"_save_faithfulness_chart"},
+            {"plt": plotting, "np": __import__("numpy"), "os": __import__("os")},
+        )
+        metrics = {}
+        for prefix in ("clean", "adv"):
+            for mode in ("del", "ins"):
+                metrics[f"{prefix}_{mode}_scores"] = [1.0, 0.5, 0.0]
+                metrics[f"{prefix}_{mode}_auc"] = 0.5
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "faithfulness.png")
+            namespace["_save_faithfulness_chart"](metrics, path)
+            figure.savefig.assert_called_once_with(path, dpi=180)
+        for axis in axes:
+            self.assertEqual(axis.plot.call_count, 2)
+            labels = [call.kwargs["label"] for call in axis.plot.call_args_list]
+            self.assertEqual(labels, ["Clean (AUC=0.5000)", "Adversarial (AUC=0.5000)"])
+            axis.set_ylabel.assert_called_once_with("Normalized score")
+        plotting.show.assert_not_called()
+        plotting.close.assert_called_once_with(figure)
+
+    def test_faithfulness_chart_show_is_opt_in(self):
+        plotting = MagicMock()
+        plotting.subplots.return_value = (MagicMock(), [MagicMock(), MagicMock()])
+        namespace = load_functions(
+            "run_sample.py", {"_save_faithfulness_chart"},
+            {"plt": plotting, "np": __import__("numpy"), "os": __import__("os")},
+        )
+        metrics = {
+            f"{prefix}_{mode}_{suffix}": value
+            for prefix in ("clean", "adv")
+            for mode in ("del", "ins")
+            for suffix, value in (("scores", [0.0, 1.0]), ("auc", 0.5))
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            namespace["_save_faithfulness_chart"](
+                metrics, str(Path(directory) / "chart.png"), show=True
+            )
+        plotting.show.assert_called_once()
+
     def test_runners_reject_nsgaii(self):
         for filename, arguments in (
             ("run_sample.py", ["--image", "unused.png"]),

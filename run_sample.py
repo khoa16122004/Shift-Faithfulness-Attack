@@ -3,6 +3,7 @@ import os
 import random
 import sys
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch import nn
@@ -47,6 +48,8 @@ def parse_args():
     parser.add_argument("--history-chart-output", type=str, default=None, help="Base path for fitness and saliency chart files")
     parser.add_argument("--fitness-chart-output", type=str, default=None, help="Path to save weighted fitness chart")
     parser.add_argument("--saliency-chart-output", type=str, default=None, help="Path to save saliency score chart")
+    parser.add_argument("--faithfulness-chart-output", type=str, default=None, help="Path to save clean/adv insertion and deletion curves (default: <output>_faithfulness.png)")
+    parser.add_argument("--show-faithfulness-chart", action="store_true", help="Display re-evaluated insertion/deletion curves after the attack")
     parser.add_argument("--model", type=str, default="resnet50", help="Torchvision model name")
     parser.add_argument(
         "--checkpoint-dir",
@@ -225,6 +228,39 @@ def _compute_faithfulness_metrics(model, normalize, clean_batch, adv_batch, clea
     }
 
 
+def _save_faithfulness_chart(faithfulness, output_path, show=False):
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    try:
+        for ax, mode, title, xlabel in [
+            (axes[0], "del", "Deletion", "Fraction of pixels deleted"),
+            (axes[1], "ins", "Insertion", "Fraction of pixels inserted"),
+        ]:
+            for prefix, label in [("clean", "Clean"), ("adv", "Adversarial")]:
+                scores = faithfulness[f"{prefix}_{mode}_scores"]
+                auc_value = faithfulness[f"{prefix}_{mode}_auc"]
+                ax.plot(
+                    np.linspace(0, 1, len(scores)),
+                    scores,
+                    label=f"{label} (AUC={auc_value:.4f})",
+                    linewidth=2,
+                )
+            ax.set_title(title)
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel("Normalized score")
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1.05)
+            ax.grid(alpha=0.3)
+            ax.legend()
+        fig.suptitle("Re-evaluated faithfulness: clean vs adversarial")
+        fig.tight_layout()
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+        fig.savefig(output_path, dpi=180)
+        if show:
+            plt.show()
+    finally:
+        plt.close(fig)
+
+
 def run_attack(args):
     if args.seed is not None:
         random.seed(args.seed)
@@ -362,6 +398,13 @@ def run_attack(args):
         clean_saliency_map=clean_saliency_map,
         adv_saliency_map=adv_saliency_map,
     )
+    output_root, _ = os.path.splitext(args.output)
+    faithfulness_chart_path = args.faithfulness_chart_output or f"{output_root}_faithfulness.png"
+    _save_faithfulness_chart(
+        faithfulness,
+        faithfulness_chart_path,
+        show=args.show_faithfulness_chart,
+    )
     _save_saliency_map(clean_saliency_map, clean_map_path)
     _save_saliency_map(adv_saliency_map[0], adv_map_path)
     class_a = int(y_true.item())
@@ -423,6 +466,8 @@ def run_attack(args):
     print(f"spearman_best_adv_vs_clean: {float(best_scores.get('spearman', float('nan')))}")
     print(f"faithfulness_adv_del_auc: {faithfulness['adv_del_auc']:.6f}")
     print(f"faithfulness_adv_ins_auc: {faithfulness['adv_ins_auc']:.6f}")
+    print(f"faithfulness_clean_del_auc: {faithfulness['clean_del_auc']:.6f}")
+    print(f"faithfulness_clean_ins_auc: {faithfulness['clean_ins_auc']:.6f}")
     print(f"faithfulness_adv_avg_auc: {faithfulness['avg_adv_faithfulness_auc']:.6f}")
     print(f"first_success_iteration: {best_scores.get('first_success_iteration')}")
     print(f"algorithm: {args.algorithm}")
@@ -433,6 +478,7 @@ def run_attack(args):
     print(f"seed: {args.seed}")
     print(f"saved_clean_image: {clean_image_path}")
     print(f"saved_adv: {args.output}")
+    print(f"saved_faithfulness_chart: {faithfulness_chart_path}")
     print(f"saved_clean_map: {clean_map_path}")
     print(f"saved_adv_map: {adv_map_path}")
     print(f"saved_clean_map_class_a: {four_map_paths['clean_a']}")
@@ -468,6 +514,7 @@ def run_attack(args):
         "seed": args.seed,
         "saved_clean_image": clean_image_path,
         "saved_adv": args.output,
+        "saved_faithfulness_chart": faithfulness_chart_path,
         "saved_clean_map": clean_map_path,
         "saved_adv_map": adv_map_path,
         "saved_clean_map_class_a": four_map_paths["clean_a"],
