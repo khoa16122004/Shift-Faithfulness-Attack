@@ -401,11 +401,11 @@ def _is_saliency_optimized_fitness(fitness_function):
 
 
 def _build_wd_wi_mode_tag(args):
-    if args.w_causal is not None:
-        return f"mixed_wc={_fmt_num(args.w_causal)}"
-
     if _is_saliency_optimized_fitness(args.fitness_function):
         return "saliency_optimized"
+
+    if args.w_del is None and args.w_ins is None and args.w_causal is not None:
+        return f"mixed_wc={_fmt_num(args.w_causal)}"
 
     w_del, w_ins = _resolve_wd_wi_for_tag(args)
 
@@ -518,12 +518,6 @@ def create_fitness(fitness_function, model, x_tensor, normalize, y_true, explain
     raise ValueError(f"Unsupported fitness function: {fitness_function}")
 
 
-def _sorted_front_by_score1(front_fitness):
-    if front_fitness is None:
-        return None
-
-    order = np.argsort(front_fitness[:, 0], kind="mergesort")
-    return front_fitness[order]
 
 
 def run_attack_one(image_path, output_paths, model_name, model, spatial, normalize, explain_fn, args, device, sample_seed=None):

@@ -306,7 +306,7 @@ def run_attack(args):
     history_del = [float(item["del_loss"]) for item in history if "del_loss" in item]
     history_ins = [float(item["ins_loss"]) for item in history if "ins_loss" in item]
     history_spearman = [float(item["spearman"]) for item in history if "spearman" in item]
-    history_saliency = [float(item.get("saliency_loss", float("nan"))) for item in history]
+    history_saliency = [float(item["saliency_loss"]) for item in history if "saliency_loss" in item]
     history_weighted = [float(item["weighted_fitness"]) for item in history if "weighted_fitness" in item]
     output_root, _ = os.path.splitext(args.output)
     history_scores_path = f"{output_root}_history_scores.txt"

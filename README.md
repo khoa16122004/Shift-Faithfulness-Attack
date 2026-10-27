@@ -16,13 +16,64 @@ python run_batch.py \
 	--num_sample 100 \
 	--operator-strategy uniform \
 	--eps 50 \
-	--w-margin 0.0 \
 	--w-del 0.5 \
 	--w-ins 0.5 \
 	--seed 22520691 \
 	--fitness-function margin_loss_causal_faithfull \
 	--output-root rivf_official/server_run_seed/GA/22520691/ \
 	--explain-method simple_gradient
+```
+
+### Single-image attack
+
+```sh
+python run_sample.py \
+	--image test_imgs/cat_dog.png \
+	--output outputs/adv.png \
+	--model resnet18 \
+	--fitness-function margin_loss_causal_faithfull \
+	--w-del 0.5 \
+	--w-ins 0.5 \
+	--seed 22520691 \
+	--save-history-chart
+```
+
+Replace the input image path with an existing image. The sample and batch runners
+use the same fitness/attacker factories, population defaults (50 individuals,
+200 iterations), and per-iteration deletion/insertion logging.
+
+Only `weighted_sum_ga` is supported; NSGA-II and Pareto-front output were removed
+from the attack runners. The GA keeps a population for reproduction and **one
+best-so-far candidate** across all generations. Only candidates whose predicted
+class matches the clean prediction can replace that incumbent, and the candidate
+with the smallest weighted sum wins. The incumbent is retained for reproduction,
+so a later, worse generation cannot discard it. If no initial candidate preserves
+the class, a zero-perturbation clean seed is inserted and reported explicitly.
+An explicit `--label` must match the clean prediction.
+
+Margin/CE classification losses are not evaluated or included in the weighted
+sum. Existing fitness names remain accepted as compatibility names:
+
+- Saliency variants minimize `w_saliency * saliency_loss` (soft IoU, or negative
+  MSE for the MSE variants). Their deletion/insertion values are logged only.
+- Causal variants minimize `w_del * del_loss + w_ins * ins_loss`. If either weight
+  is explicit, an omitted weight is zero. Otherwise each weight is `w_causal / 2`,
+  or `w_saliency / 2` when `--w-causal` is omitted.
+- Combined causal+saliency fitness adds `w_saliency * saliency_loss` to that causal
+  sum. Explicit deletion/insertion weights take precedence over `--w-causal`.
+
+Batch runners accept `--w-margin 0` for older scripts, but reject nonzero values.
+The single-image runner no longer accepts `--w-margin`. Histories contain named
+columns with a `#` header and no margin column; summaries expose
+`history_weighted_fitness` instead of `history_margin`. Sample charts show weighted
+fitness and saliency (or insertion loss for causal-only runs);
+`--fitness-chart-output` replaces `--margin-chart-output`.
+Historical evaluation scripts for older margin/Pareto results are unchanged.
+
+Focused regression tests (CPU, no model downloads):
+
+```sh
+python -m unittest discover -s tests -p "test_weighted_sum_ga.py"
 ```
 
 ## Citation

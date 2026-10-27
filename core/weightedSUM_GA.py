@@ -70,6 +70,8 @@ class Weighted_Sum_GA:
     def _compute_weighted_fitness(self, objectives):
         saliency = objectives.get("saliency_loss")
         if "del_loss" not in objectives:
+            if saliency is None:
+                raise ValueError("Fitness must provide saliency or deletion/insertion objectives")
             return float(self.params["w_saliency"]) * saliency
 
         deletion = objectives["del_loss"]
