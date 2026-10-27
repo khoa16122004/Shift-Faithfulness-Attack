@@ -239,31 +239,32 @@ def _save_single_score_chart(iterations, values, label, output_path, title):
 
 def save_attack_two_score_charts(
     history,
-    margin_output_path,
+    fitness_output_path,
     saliency_output_path,
-    margin_title="Margin loss history",
+    fitness_title="Weighted fitness history",
     saliency_title="Saliency loss history",
 ):
     if not history:
         raise ValueError("history is empty, cannot create chart")
 
     iterations = list(range(len(history)))
-    margin_losses = [_to_float(item["margin_loss"]) for item in history]
-    saliency_losses = [_to_float(item["saliency_loss"]) for item in history]
+    fitness_scores = [_to_float(item["weighted_fitness"]) for item in history]
+    secondary_score = "saliency_loss" if "saliency_loss" in history[0] else "ins_loss"
+    saliency_losses = [_to_float(item[secondary_score]) for item in history]
 
     _save_single_score_chart(
         iterations=iterations,
-        values=margin_losses,
-        label="margin_loss",
-        output_path=margin_output_path,
-        title=margin_title,
+        values=fitness_scores,
+        label="weighted_fitness",
+        output_path=fitness_output_path,
+        title=fitness_title,
     )
     _save_single_score_chart(
         iterations=iterations,
         values=saliency_losses,
-        label="saliency_loss",
+        label=secondary_score,
         output_path=saliency_output_path,
-        title=saliency_title,
+        title=saliency_title if secondary_score == "saliency_loss" else "Insertion loss history",
     )
 
 

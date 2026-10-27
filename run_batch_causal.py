@@ -24,7 +24,7 @@ from LossFunctions import (
     ReverseMarginSalinecy_Fitness,
     ReverseNegativeCrossEntropySaliency_Fitness,
 )
-from NSGAII import NSGAII
+from run_batch import create_attacker, save_history_scores_txt
 from RISE.evaluation import CausalMetric, auc
 from imagenet_metadata import IMAGENET_CLASSNAMES
 from util import (
@@ -32,7 +32,6 @@ from util import (
     get_explainable_method,
     get_torchvision_model,
 )
-from weightedSUM_GA import Weighted_Sum_GA
 
 
 DEFAULT_IMAGENET_VAL_ROOT = r"E:\ImageNet1K\imagenet\ImageNet1K\val"
@@ -95,7 +94,7 @@ def parse_args():
     parser.add_argument("--pc", type=float, default=0.4)
     parser.add_argument("--pm", type=float, default=0.1)
     parser.add_argument("--zero-probability", type=float, default=0.3)
-    parser.add_argument("--w-margin", type=float, default=0.5)
+    parser.add_argument("--w-margin", type=float, default=0.0, help="Deprecated compatibility option; must be 0")
     parser.add_argument("--w-saliency", type=float, default=0.5)
     parser.add_argument(
         "--fitness-function",
@@ -115,7 +114,7 @@ def parse_args():
         "--algorithm",
         type=str,
         default="weighted_sum_ga",
-        choices=["weighted_sum_ga", "nsgaii"],
+        choices=["weighted_sum_ga"],
     )
     parser.add_argument(
         "--operator-strategy",
@@ -133,7 +132,10 @@ def parse_args():
     parser.add_argument("--save-process", action="store_true")
     parser.add_argument("--verbose", type=int, default=0, choices=[0, 1, 2])
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.w_margin != 0:
+        parser.error("--w-margin must be 0; margin loss was removed")
+    return args
 
 
 def _to_float(value):
@@ -186,38 +188,11 @@ def _save_four_class_maps(model, explain_fn, normalize, clean_chw, adv_chw, clas
     _save_saliency_map(adv_map_b[0], str(output_paths["adv_b"]))
 
 
-def save_history_scores_txt(history, output_path):
-    with open(output_path, "w", encoding="utf-8") as f:
-        for item in history:
-            margin = _to_float(item["margin_loss"])
-            saliency = _to_float(item["saliency_loss"])
-            f.write(f"{margin:.12g} {saliency:.12g}\n")
-
-
-def save_non_dominated_front_txt(front_fitness, output_path):
-    if front_fitness is None:
-        return
-    with open(output_path, "w", encoding="utf-8") as f:
-        for row in front_fitness:
-            score_1 = float(row[0])
-            score_2 = float(row[1])
-            f.write(f"{score_1:.12g} {score_2:.12g}\n")
-
-
 def history_to_lists(history):
-    margin = []
     saliency = []
     for item in history:
-        margin.append(_to_float(item["margin_loss"]))
         saliency.append(_to_float(item["saliency_loss"]))
-    return margin, saliency
-
-
-def _sorted_front_by_score1(front_fitness):
-    if front_fitness is None:
-        return None
-    order = np.argsort(front_fitness[:, 0], kind="mergesort")
-    return front_fitness[order]
+    return saliency
 
 
 def load_selection_file(selection_file):
@@ -265,7 +240,6 @@ def prepare_output_paths(output_dir):
         "adv_map_class_a": output_dir / "adv_map_class_a.png",
         "adv_map_class_b": output_dir / "adv_map_class_b.png",
         "history_txt": output_dir / "history_scores.txt",
-        "non_dominated_front_txt": output_dir / "non_dominated_front_scores.txt",
         "summary": output_dir / "summary.json",
     }
 
@@ -273,7 +247,6 @@ def prepare_output_paths(output_dir):
 def build_approach_tag(args):
     parts = [
         f"strategy-{args.operator_strategy}",
-        f"wm-{_fmt_num(args.w_margin)}",
         f"ws-{_fmt_num(args.w_saliency)}",
         f"eps-{_fmt_num(args.eps)}",
         f"ps-{_fmt_num(args.p_size)}",
@@ -281,8 +254,6 @@ def build_approach_tag(args):
         f"temp-{_fmt_num(args.saliency_temperature)}",
         f"exp-{args.explain_method}",
     ]
-    if args.algorithm != "weighted_sum_ga":
-        parts.append(f"algo-{args.algorithm}")
     if args.fitness_function != "margin_saliency":
         fit_name = args.fitness_function
         if fit_name == "cross_entropy_saliency":
@@ -293,14 +264,6 @@ def build_approach_tag(args):
     if args.seed is not None:
         parts.append(f"seed-{args.seed}")
     return "__".join(parts)
-
-
-def create_attacker(ga_params, algorithm):
-    if algorithm == "weighted_sum_ga":
-        return Weighted_Sum_GA(ga_params)
-    if algorithm == "nsgaii":
-        return NSGAII(ga_params)
-    raise ValueError(f"Unsupported algorithm: {algorithm}")
 
 
 def create_fitness(fitness_function, model, x_tensor, normalize, y_true, explain_fn):
@@ -376,6 +339,7 @@ def _compute_causal_metrics(model, normalize, clean_batch, adv_batch, clean_sali
 def run_attack_one(image_path, output_paths, model_name, model, spatial, normalize, explain_fn, args, device, sample_seed=None):
     if sample_seed is not None:
         random.seed(sample_seed)
+        np.random.seed(sample_seed)
         torch.manual_seed(sample_seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(sample_seed)
@@ -408,7 +372,6 @@ def run_attack_one(image_path, output_paths, model_name, model, spatial, normali
         "pm": args.pm,
         "zero_probability": args.zero_probability,
         "all_pixels": torch.arange(x_tensor.shape[-2] * x_tensor.shape[-1], device=device),
-        "w_margin": args.w_margin,
         "w_saliency": args.w_saliency,
         "operator_strategy": args.operator_strategy,
         "saliency_temperature": args.saliency_temperature,
@@ -416,14 +379,7 @@ def run_attack_one(image_path, output_paths, model_name, model, spatial, normali
     }
 
     attacker = create_attacker(ga_params, args.algorithm)
-    attack_output = attacker.attack()
-    if len(attack_output) >= 5:
-        adv_chw, best_candidate, best_scores, history, non_nominated_front_fitness = attack_output
-    else:
-        adv_chw, best_candidate, best_scores, history = attack_output
-        non_nominated_front_fitness = None
-
-    non_nominated_front_fitness = _sorted_front_by_score1(non_nominated_front_fitness)
+    adv_chw, best_candidate, best_scores, history = attacker.attack()
 
     adv_chw_cpu = adv_chw.detach().cpu()
     save_image(x_tensor[0].detach().cpu(), str(output_paths["clean"]))
@@ -458,11 +414,8 @@ def run_attack_one(image_path, output_paths, model_name, model, spatial, normali
     )
 
     save_history_scores_txt(history, str(output_paths["history_txt"]))
-    save_non_dominated_front_txt(non_nominated_front_fitness, str(output_paths["non_dominated_front_txt"]))
 
-    weighted_fitness = best_scores.get("weighted_fitness")
-    if weighted_fitness is None:
-        weighted_fitness = args.w_margin * float(best_scores["margin_loss"]) + args.w_saliency * float(best_scores["saliency_loss"])
+    weighted_fitness = best_scores["weighted_fitness"]
 
     causal = _compute_causal_metrics(
         model=model,
@@ -475,7 +428,7 @@ def run_attack_one(image_path, output_paths, model_name, model, spatial, normali
         args=args,
     )
 
-    history_margin, history_saliency = history_to_lists(history)
+    history_saliency = history_to_lists(history)
 
     return {
         "model": model_name,
@@ -485,7 +438,6 @@ def run_attack_one(image_path, output_paths, model_name, model, spatial, normali
         "adv_pred": int(adv_pred),
         "class_name": class_name,
         "l0_distance": int(best_candidate.l0_distance(adv_chw_cpu.to(device))),
-        "margin_loss": float(best_scores["margin_loss"]),
         "saliency_loss": float(best_scores["saliency_loss"]),
         "weighted_fitness": float(weighted_fitness),
         "first_success_iteration": best_scores.get("first_success_iteration"),
@@ -494,8 +446,7 @@ def run_attack_one(image_path, output_paths, model_name, model, spatial, normali
         "operator_strategy": args.operator_strategy,
         "saliency_temperature": float(args.saliency_temperature),
         "history_scores_file": str(output_paths["history_txt"]),
-        "non_dominated_front_scores_file": str(output_paths["non_dominated_front_txt"]) if non_nominated_front_fitness is not None else None,
-        "history_margin": history_margin,
+        "history_weighted_fitness": [float(item["weighted_fitness"]) for item in history],
         "history_saliency": history_saliency,
         "causual": {
             "del": causal["adv_del_scores"],

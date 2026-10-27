@@ -15,19 +15,15 @@ CORE_DIR = os.path.join(ROOT_DIR, "core")
 if CORE_DIR not in sys.path:
     sys.path.insert(0, CORE_DIR)
 
-from LossFunctions import (
-    CEMarrginLossSaliency_Fitness,
-    MarginLossCausalFaithFull,
-    MarginLossCausalFaithFullSaliency_Fitness,
-    MarginSalinecy_Fitness,
-    NegativeCrossEntropySaliency_Fitness,
-    ReverseMarginSalinecy_Fitness,
-    ReverseNegativeCrossEntropySaliency_Fitness,
-)
+from LossFunctions import MarginLossCausalFaithFull
 from RISE.evaluation import CausalMetric, auc
+from run_batch import (
+    _is_saliency_optimized_fitness,
+    create_attacker,
+    create_fitness,
+    save_history_scores_txt,
+)
 from util import build_blur_substrate, get_explainable_method, get_torchvision_model, save_attack_two_score_charts
-from weightedSUM_GA import Weighted_Sum_GA
-from NSGAII import NSGAII
 
 
 class SoftmaxModel(nn.Module):
@@ -47,9 +43,9 @@ def parse_args():
     parser.add_argument("--clean-image-output", type=str, default=None, help="Path to save resized clean image")
     parser.add_argument("--clean-map-output", type=str, default=None, help="Path to save clean/original saliency map")
     parser.add_argument("--adv-map-output", type=str, default=None, help="Path to save adversarial saliency map")
-    parser.add_argument("--save-history-chart", action="store_true", help="Save separate charts for margin and saliency scores")
-    parser.add_argument("--history-chart-output", type=str, default=None, help="Base path used to derive *_margin and *_saliency chart files")
-    parser.add_argument("--margin-chart-output", type=str, default=None, help="Path to save margin score chart")
+    parser.add_argument("--save-history-chart", action="store_true", help="Save separate charts for fitness and saliency scores")
+    parser.add_argument("--history-chart-output", type=str, default=None, help="Base path for fitness and saliency chart files")
+    parser.add_argument("--fitness-chart-output", type=str, default=None, help="Path to save weighted fitness chart")
     parser.add_argument("--saliency-chart-output", type=str, default=None, help="Path to save saliency score chart")
     parser.add_argument("--model", type=str, default="resnet50", help="Torchvision model name")
     parser.add_argument(
@@ -83,14 +79,13 @@ def parse_args():
         help="Saliency explanation method",
     )
 
-    parser.add_argument("--pop-size", type=int, default=20)
-    parser.add_argument("--iterations", type=int, default=50)
+    parser.add_argument("--pop-size", type=int, default=50)
+    parser.add_argument("--iterations", type=int, default=200)
     parser.add_argument("--eps", type=int, default=50, help="Number of perturbed pixels")
     parser.add_argument("--p-size", type=float, default=1.0)
     parser.add_argument("--pc", type=float, default=0.4)
     parser.add_argument("--pm", type=float, default=0.1)
     parser.add_argument("--zero-probability", type=float, default=0.3, help="Probability of zero channel perturbation")
-    parser.add_argument("--w-margin", type=float, default=0.5)
     parser.add_argument("--w-saliency", type=float, default=0.5)
     parser.add_argument("--w-causal", type=float, default=None, help="Weight for averaged causal loss (del+ins)/2 in mixed causal+saliency fitness")
     parser.add_argument("--w-del", type=float, default=None, help="Weight for deletion loss when fitness has 3 objectives")
@@ -119,7 +114,7 @@ def parse_args():
         "--algorithm",
         type=str,
         default="weighted_sum_ga",
-        choices=["weighted_sum_ga", "nsgaii"],
+        choices=["weighted_sum_ga"],
         help="Optimization algorithm to run",
     )
     parser.add_argument(
@@ -230,103 +225,10 @@ def _compute_faithfulness_metrics(model, normalize, clean_batch, adv_batch, clea
     }
 
 
-def create_attacker(ga_params, algorithm):
-    if algorithm == "weighted_sum_ga":
-        return Weighted_Sum_GA(ga_params)
-    if algorithm == "nsgaii":
-        return NSGAII(ga_params)
-    raise ValueError(f"Unsupported algorithm: {algorithm}")
-
-
-def create_fitness(fitness_function, model, x_tensor, normalize, y_true, explain_fn):
-    if fitness_function == "margin_saliency":
-        return MarginSalinecy_Fitness(
-            model=model,
-            x_tensor=x_tensor,
-            normalize=normalize,
-            y_true=y_true,
-            explain_method=explain_fn,
-        )
-    if fitness_function in {"negative_cross_entropy_saliency", "cross_entropy_saliency"}:
-        return NegativeCrossEntropySaliency_Fitness(
-            model=model,
-            x_tensor=x_tensor,
-            normalize=normalize,
-            y_true=y_true,
-            explain_method=explain_fn,
-        )
-        
-    if fitness_function == "reverse_margin_saliency":
-        return ReverseMarginSalinecy_Fitness(
-            model=model,
-            x_tensor=x_tensor,
-            normalize=normalize,
-            y_true=y_true,
-            explain_method=explain_fn,
-        )
-    
-    if fitness_function == "reverse_negative_cross_entropy_saliency":
-        return ReverseNegativeCrossEntropySaliency_Fitness(
-            model=model,
-            x_tensor=x_tensor,
-            normalize=normalize,
-            y_true=y_true,
-            explain_method=explain_fn,
-        )
-
-    if fitness_function in {"margin_loss_mse_saliency", "MarginLossMESE", "ce_margin_loss_saliency", "CEMarrginLoss"}:
-        return CEMarrginLossSaliency_Fitness(
-            model=model,
-            x_tensor=x_tensor,
-            normalize=normalize,
-            y_true=y_true,
-            explain_method=explain_fn,
-        )
-
-    if fitness_function in {"margin_loss_causal_faithfull", "ce_loss_causal_faithfull"}:
-        return MarginLossCausalFaithFull(
-            model=model,
-            x_tensor=x_tensor,
-            normalize=normalize,
-            y_true=y_true,
-            explain_method=explain_fn,
-        )
-
-    if fitness_function == "margin_loss_causal_faithfull_saliency":
-        return MarginLossCausalFaithFullSaliency_Fitness(
-            model=model,
-            x_tensor=x_tensor,
-            normalize=normalize,
-            y_true=y_true,
-            explain_method=explain_fn,
-        )
-    
-    raise ValueError(f"Unsupported fitness function: {fitness_function}")
-
-
-def _sorted_front_by_score1(front_fitness):
-    if front_fitness is None:
-        return None
-
-    order = np.argsort(front_fitness[:, 0], kind="mergesort")
-    return front_fitness[order]
-
-
-def save_non_dominated_front_txt(front_fitness, output_path):
-    if front_fitness is None:
-        return
-
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as f:
-        for row in front_fitness:
-            score_1 = float(row[0])
-            score_2 = float(row[1])
-            f.write(f"{score_1:.12g} {score_2:.12g}\n")
-
-
 def run_attack(args):
     if args.seed is not None:
         random.seed(args.seed)
+        np.random.seed(args.seed)
         torch.manual_seed(args.seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(args.seed)
@@ -363,6 +265,16 @@ def run_attack(args):
         explain_fn=explain_fn,
     )
 
+    metric_fitness = None
+    if _is_saliency_optimized_fitness(args.fitness_function):
+        metric_fitness = MarginLossCausalFaithFull(
+            model=model,
+            x_tensor=x_tensor,
+            normalize=normalize,
+            y_true=y_true,
+            explain_method=explain_fn,
+        )
+
     ga_params = {
         "x_tensor": x_tensor,
         "normalize": normalize,
@@ -375,66 +287,31 @@ def run_attack(args):
         "pm": args.pm,
         "zero_probability": args.zero_probability,
         "all_pixels": torch.arange(x_tensor.shape[-2] * x_tensor.shape[-1], device=device),
-        "w_margin": args.w_margin,
         "w_saliency": args.w_saliency,
         "w_causal": args.w_causal,
         "w_del": args.w_del,
         "w_ins": args.w_ins,
-        "combine_margin_saliency_del_ins": args.fitness_function == "margin_loss_causal_faithfull_saliency",
         "operator_strategy": args.operator_strategy,
         "saliency_temperature": args.saliency_temperature,
         "device": args.device,
+        "metric_fitness": metric_fitness,
     }
 
     attacker = create_attacker(ga_params, args.algorithm)
-    attack_output = attacker.attack()
-    if len(attack_output) >= 5:
-        adv_chw, best_candidate, best_scores, history, non_nominated_front_fitness = attack_output
-    else:
-        adv_chw, best_candidate, best_scores, history = attack_output
-        non_nominated_front_fitness = None
-
-    non_nominated_front_fitness = _sorted_front_by_score1(non_nominated_front_fitness)
+    adv_chw, best_candidate, best_scores, history = attacker.attack()
 
     adv_chw = adv_chw.detach().cpu()
-    weighted_fitness = best_scores.get("weighted_fitness")
-    if weighted_fitness is None:
-        if "del_loss" in best_scores and "ins_loss" in best_scores:
-            if (
-                args.fitness_function == "margin_loss_causal_faithfull_saliency"
-                and (args.w_del is not None or args.w_ins is not None)
-            ):
-                w_del = 0.0 if args.w_del is None else float(args.w_del)
-                w_ins = 0.0 if args.w_ins is None else float(args.w_ins)
-                weighted_fitness = (
-                    args.w_margin * float(best_scores["margin_loss"])
-                    + args.w_saliency * float(best_scores.get("saliency_loss", 0.0))
-                    + w_del * float(best_scores["del_loss"])
-                    + w_ins * float(best_scores["ins_loss"])
-                )
-            elif args.w_causal is not None:
-                causal_obj = 0.5 * (float(best_scores["del_loss"]) + float(best_scores["ins_loss"]))
-                weighted_fitness = (
-                    args.w_margin * float(best_scores["margin_loss"])
-                    + args.w_saliency * float(best_scores.get("saliency_loss", 0.0))
-                    + float(args.w_causal) * causal_obj
-                )
-            else:
-                w_del = args.w_del if args.w_del is not None else args.w_saliency * 0.5
-                w_ins = args.w_ins if args.w_ins is not None else args.w_saliency * 0.5
-                weighted_fitness = (
-                    args.w_margin * float(best_scores["margin_loss"])
-                    + float(w_del) * float(best_scores["del_loss"])
-                    + float(w_ins) * float(best_scores["ins_loss"])
-                )
-        else:
-            weighted_fitness = args.w_margin * float(best_scores["margin_loss"]) + args.w_saliency * float(best_scores["saliency_loss"])
+    weighted_fitness = best_scores["weighted_fitness"]
 
-    history_margin = [float(item["margin_loss"]) for item in history]
     history_del = [float(item["del_loss"]) for item in history if "del_loss" in item]
     history_ins = [float(item["ins_loss"]) for item in history if "ins_loss" in item]
     history_spearman = [float(item["spearman"]) for item in history if "spearman" in item]
     history_saliency = [float(item.get("saliency_loss", float("nan"))) for item in history]
+    history_weighted = [float(item["weighted_fitness"]) for item in history if "weighted_fitness" in item]
+    output_root, _ = os.path.splitext(args.output)
+    history_scores_path = f"{output_root}_history_scores.txt"
+    os.makedirs(os.path.dirname(history_scores_path) or ".", exist_ok=True)
+    save_history_scores_txt(history, history_scores_path)
 
     clean_image_path = args.clean_image_output
     if clean_image_path is None:
@@ -475,10 +352,6 @@ def run_attack(args):
     for path in four_map_paths.values():
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
 
-    output_root, _ = os.path.splitext(args.output)
-    non_dominated_front_txt = f"{output_root}_non_dominated_front_scores.txt"
-    save_non_dominated_front_txt(non_nominated_front_fitness, non_dominated_front_txt)
-
     clean_saliency_map = fitness.saliency_true[0]
     adv_saliency_map, _ = explain_fn(model, adv_chw.unsqueeze(0).to(device), normalize, y_true)
     faithfulness = _compute_faithfulness_metrics(
@@ -505,12 +378,12 @@ def run_attack(args):
         output_paths=four_map_paths,
     )
 
-    margin_chart_path = None
+    fitness_chart_path = None
     saliency_chart_path = None
     should_save_history_chart = (
         args.save_history_chart
         or (args.history_chart_output is not None)
-        or (args.margin_chart_output is not None)
+        or (args.fitness_chart_output is not None)
         or (args.saliency_chart_output is not None)
     )
     if should_save_history_chart:
@@ -523,14 +396,14 @@ def run_attack(args):
             if base_ext:
                 output_ext = base_ext
 
-        margin_chart_path = args.margin_chart_output or f"{base_root}_margin{output_ext}"
+        fitness_chart_path = args.fitness_chart_output or f"{base_root}_fitness{output_ext}"
         saliency_chart_path = args.saliency_chart_output or f"{base_root}_saliency{output_ext}"
 
-        os.makedirs(os.path.dirname(margin_chart_path) or ".", exist_ok=True)
+        os.makedirs(os.path.dirname(fitness_chart_path) or ".", exist_ok=True)
         os.makedirs(os.path.dirname(saliency_chart_path) or ".", exist_ok=True)
         save_attack_two_score_charts(
             history,
-            margin_output_path=margin_chart_path,
+            fitness_output_path=fitness_chart_path,
             saliency_output_path=saliency_chart_path,
         )
 
@@ -541,12 +414,11 @@ def run_attack(args):
     print(f"clean_pred: {pred}")
     print(f"adv_pred: {adv_pred}")
     print(f"l0_distance: {int(best_candidate.l0_distance(adv_chw.to(device)))}")
-    print(f"margin_loss: {float(best_scores['margin_loss'])}")
+    if "saliency_loss" in best_scores:
+        print(f"saliency_loss: {float(best_scores['saliency_loss'])}")
     if "del_loss" in best_scores and "ins_loss" in best_scores:
         print(f"del_loss: {float(best_scores['del_loss'])}")
         print(f"ins_loss: {float(best_scores['ins_loss'])}")
-    else:
-        print(f"saliency_loss: {float(best_scores['saliency_loss'])}")
     print(f"weighted_fitness: {float(weighted_fitness)}")
     print(f"spearman_best_adv_vs_clean: {float(best_scores.get('spearman', float('nan')))}")
     print(f"faithfulness_adv_del_auc: {faithfulness['adv_del_auc']:.6f}")
@@ -567,10 +439,8 @@ def run_attack(args):
     print(f"saved_clean_map_class_b: {four_map_paths['clean_b']}")
     print(f"saved_adv_map_class_a: {four_map_paths['adv_a']}")
     print(f"saved_adv_map_class_b: {four_map_paths['adv_b']}")
-    if non_nominated_front_fitness is not None:
-        print(f"saved_non_dominated_front_scores: {non_dominated_front_txt}")
-    if margin_chart_path is not None and saliency_chart_path is not None:
-        print(f"saved_margin_chart: {margin_chart_path}")
+    if fitness_chart_path is not None and saliency_chart_path is not None:
+        print(f"saved_fitness_chart: {fitness_chart_path}")
         print(f"saved_saliency_chart: {saliency_chart_path}")
     else:
         print("saved_history_chart: disabled (use --save-history-chart)")
@@ -582,8 +452,7 @@ def run_attack(args):
         "clean_pred": pred.detach().cpu().tolist(),
         "adv_pred": adv_pred,
         "l0_distance": int(best_candidate.l0_distance(adv_chw.to(device))),
-        "margin_loss": float(best_scores["margin_loss"]),
-        "saliency_loss": float(best_scores.get("saliency_loss", float("nan"))),
+        "saliency_loss": float(best_scores["saliency_loss"]) if "saliency_loss" in best_scores else None,
         "del_loss": float(best_scores["del_loss"]) if "del_loss" in best_scores else None,
         "ins_loss": float(best_scores["ins_loss"]) if "ins_loss" in best_scores else None,
         "weighted_fitness": float(weighted_fitness),
@@ -605,10 +474,10 @@ def run_attack(args):
         "saved_clean_map_class_b": four_map_paths["clean_b"],
         "saved_adv_map_class_a": four_map_paths["adv_a"],
         "saved_adv_map_class_b": four_map_paths["adv_b"],
-        "saved_non_dominated_front_scores": non_dominated_front_txt if non_nominated_front_fitness is not None else None,
-        "saved_margin_chart": margin_chart_path,
+        "saved_fitness_chart": fitness_chart_path,
         "saved_saliency_chart": saliency_chart_path,
-        "history_margin": history_margin,
+        "history_scores_file": history_scores_path,
+        "history_weighted_fitness": history_weighted,
         "history_saliency": history_saliency,
         "history_del": history_del,
         "history_ins": history_ins,

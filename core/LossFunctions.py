@@ -18,6 +18,10 @@ class MarginSalinecy_Fitness:
         margin_loss = self.cal_marginloss(logits, self.y_true)
         saliency_loss = self.cal_saliency_loss(saliency_maps, self.saliency_true)
         return margin_loss, saliency_loss, logits
+
+    def benchmark_objectives(self, xadv_tensors):
+        saliency_maps, logits = self.explain_method(self.model, xadv_tensors, self.normalize, self.y_true)
+        return {"saliency_loss": self.cal_saliency_loss(saliency_maps, self.saliency_true)}, logits
     
         
     def cal_marginloss(self, logits, y_true):
@@ -93,6 +97,10 @@ class CEMarrginLossSaliency_Fitness(MarginSalinecy_Fitness):
         ce_margin_loss = self.cal_ce_margin_loss(logits, self.y_true)
         saliency_loss = self.cal_mse_saliency_loss(saliency_map, self.saliency_true)
         return ce_margin_loss, saliency_loss, logits
+
+    def benchmark_objectives(self, xadv_tensors):
+        saliency_maps, logits = self.explain_method(self.model, xadv_tensors, self.normalize, self.y_true)
+        return {"saliency_loss": self.cal_mse_saliency_loss(saliency_maps, self.saliency_true)}, logits
     
     def cal_ce_margin_loss(self, logits, y_true):
         with torch.no_grad():
@@ -128,6 +136,11 @@ class MarginLossCausalFaithFull(MarginSalinecy_Fitness):
         margin_loss = self.cal_marginloss(logits, self.y_true)
         del_loss, ins_loss = self.cal_faithfulnessloss(xadv_tensors, saliency_maps, self.y_true)
         return margin_loss, del_loss, ins_loss, logits
+
+    def benchmark_objectives(self, xadv_tensors):
+        saliency_maps, logits = self.explain_method(self.model, xadv_tensors, self.normalize, self.y_true)
+        del_loss, ins_loss = self.cal_faithfulnessloss(xadv_tensors, saliency_maps, self.y_true)
+        return {"del_loss": del_loss, "ins_loss": ins_loss}, logits
     
     def cal_faithfulnessloss(
         self,
@@ -241,6 +254,15 @@ class MarginLossCausalFaithFullSaliency_Fitness(MarginLossCausalFaithFull):
         saliency_loss = self.cal_saliency_loss(saliency_maps, self.saliency_true)
         del_loss, ins_loss = self.cal_faithfulnessloss(xadv_tensors, saliency_maps, self.y_true)
         return margin_loss, saliency_loss, del_loss, ins_loss, logits
+
+    def benchmark_objectives(self, xadv_tensors):
+        saliency_maps, logits = self.explain_method(self.model, xadv_tensors, self.normalize, self.y_true)
+        del_loss, ins_loss = self.cal_faithfulnessloss(xadv_tensors, saliency_maps, self.y_true)
+        return {
+            "saliency_loss": self.cal_saliency_loss(saliency_maps, self.saliency_true),
+            "del_loss": del_loss,
+            "ins_loss": ins_loss,
+        }, logits
 
 
 # Backward-compatible alias.
